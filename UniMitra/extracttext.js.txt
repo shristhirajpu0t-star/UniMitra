@@ -1,0 +1,78 @@
+const fs = require("fs");
+const pdfParse = require("pdf-parse");
+const mammoth = require("mammoth");
+const Tesseract = require("tesseract.js");
+const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+const ffmpeg = require("fluent-ffmpeg");
+
+// Set ffmpeg path
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+// ---------------- PDF ----------------
+async function extractPDF(filePath) {
+  try {
+    const data = await pdfParse(fs.readFileSync(filePath));
+    return data.text || "";
+  } catch (err) {
+    console.error("PDF Extraction Error:", err, filePath);
+    return "";
+  }
+}
+
+// ---------------- DOCX ----------------
+async function extractDOCX(filePath) {
+  try {
+    const result = await mammoth.extractRawText({ path: filePath });
+    return result.value || "";
+  } catch (err) {
+    console.error("DOCX Extraction Error:", err, filePath);
+    return "";
+  }
+}
+
+// ---------------- IMAGE (OCR) ----------------
+async function extractImage(filePath) {
+  try {
+    const result = await Tesseract.recognize(filePath, "eng");
+    return result.data.text || "";
+  } catch (err) {
+    console.error("Image OCR Error:", err, filePath);
+    return "";
+  }
+}
+
+// ---------------- AUDIO / VIDEO ----------------
+async function extractAudioToText(filePath) {
+  return new Promise((resolve, reject) => {
+    const output = filePath + "_audio.wav";
+
+    ffmpeg(filePath)
+      .output(output)
+      .on("end", async () => {
+        // Replace with your whisper model if needed
+        resolve("[AUDIO_TEXT] Add your whisper model here");
+      })
+      .on("error", (err) => {
+        console.error("Audio/Video Extraction Error:", err, filePath);
+        resolve("");
+      })
+      .run();
+  });
+}
+
+// ---------------- UNIVERSAL HANDLER ----------------
+async function extractText(filePath, mime) {
+  try {
+    if (mime.includes("pdf")) return await extractPDF(filePath);
+    if (mime.includes("word") || mime.includes("docx")) return await extractDOCX(filePath);
+    if (mime.includes("image")) return await extractImage(filePath);
+    if (mime.includes("audio") || mime.includes("video")) return await extractAudioToText(filePath);
+
+    return "";
+  } catch (err) {
+    console.error("Text Extraction Error:", err, filePath);
+    return "";
+  }
+}
+
+module.exports = { extractText };

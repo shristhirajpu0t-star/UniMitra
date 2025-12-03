@@ -1,0 +1,212 @@
+const API_BASE = ''; // relative URL
+let currentTab = "notes";
+let selectedSemester = "all";
+let selectedCourse = "all";
+let selectedSubject = "all";
+let allDocuments = [];
+
+const semesters = ["1","2","3","4","5","6","7","8"];
+const courses = ["B.Sc Physics","B.Sc Chemistry","B.Sc Biology","B.Sc Mathematics","B.Sc Computer Science","BCA","B.Tech Computer Science"];
+const subjects = ["Mathematics","Physics","Programming","Data Structures","Algorithms","Java"];
+
+// --- Fetch documents ---
+async function fetchDocuments() {
+  try {
+    const res = await fetch(${API_BASE}/documents);
+    if (!res.ok) throw new Error('Failed to fetch documents');
+    const data = await res.json();
+    allDocuments = Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.error('fetchDocuments error:', err);
+    allDocuments = [];
+  }
+}
+
+// --- Escape HTML ---
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);
+}
+
+// --- Render app ---
+function renderApp() {
+  const filteredDocs = allDocuments.filter(doc => {
+    if (doc.type !== currentTab) return false;
+    if (selectedSemester !== 'all' && doc.semester !== selectedSemester) return false;
+    if (selectedCourse !== 'all' && doc.course !== selectedCourse) return false;
+    if (selectedSubject !== 'all' && doc.subject !== selectedSubject) return false;
+    return true;
+  });
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="container">
+      <div class="flex gap-6 px-0 py-4 border-b bg-white">
+        <button onclick="switchTab('notes')" class="${currentTab==='notes' ? 'tab-active' : ''} pb-2 font-semibold">📝 Notes</button>
+        <button onclick="switchTab('pyqs')" class="${currentTab==='pyqs' ? 'tab-active' : ''} pb-2 font-semibold">📚 PYQs</button>
+      </div>
+      <div class="px-0 py-4">
+        <button onclick="openUploadModal()" class="bg-blue-600 text-white px-4 py-2 rounded">➕ Upload</button>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 px-0 py-4">
+        <select onchange="filterSemester(this.value)" class="p-3 border rounded-lg">
+          <option value="all">All Semesters</option>
+          ${semesters.map(s => <option value="${s}" ${selectedSemester===s?'selected':''}>Semester ${s}</option>).join('')}
+        </select>
+        <select onchange="filterCourse(this.value)" class="p-3 border rounded-lg">
+          <option value="all">All Courses</option>
+          ${courses.map(c => <option value="${c}" ${selectedCourse===c?'selected':''}>${c}</option>).join('')}
+        </select>
+        <select onchange="filterSubject(this.value)" class="p-3 border rounded-lg">
+          <option value="all">All Subjects</option>
+          ${subjects.map(s => <option value="${s}" ${selectedSubject===s?'selected':''}>${s}</option>).join('')}
+        </select>
+      </div>
+      <main class="px-0 py-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          ${filteredDocs.length === 0 
+            ? <div class="col-span-full text-center py-16 text-gray-600">No documents found</div>
+            : filteredDocs.map(doc => `
+              <article class="card-hover bg-white p-6 rounded-xl shadow">
+                <div class="flex justify-between mb-3">
+                  <div class="text-3xl">${doc.type==='notes' ? '📄' : '📋'}</div>
+                  ${doc.semester ? <span class="px-2 py-1 text-xs text-white bg-blue-500 rounded">Sem ${doc.semester}</span> : ''}
+                </div>
+                <h3 class="font-bold mb-1">${escapeHtml(doc.title)}</h3>
+                <p><strong>Subject:</strong> ${escapeHtml(doc.subject || '')}</p>
+                <p><strong>Course:</strong> ${escapeHtml(doc.course || '')}</p>
+                <div class="flex gap-2 flex-wrap">
+                  ${doc.filename ? <a class="button-like bg-blue-600 text-white px-2 py-1 rounded" href="/download/${encodeURIComponent(doc.filename)}" download>⬇ Download</a> : ''}
+                  <button onclick="downloadText('${doc.id}')" class="bg-blue-600 text-white px-2 py-1 rounded">⬇ Download</button>
+                  <button onclick="summarizeDocument('${doc.id}')" class="bg-purple-600 text-white px-2 py-1 rounded">✨ Summarize</button>
+                  <button onclick="generateQuiz('${doc.id}')" class="bg-purple-600 text-white px-2 py-1 rounded">🎯 Quiz</button>
+                </div>
+              </article>
+            `).join('')}
+        </div>
+      </main>
+    </div>
+  `;
+}
+
+// --- Controls ---
+function switchTab(tab) { currentTab = tab; renderApp(); }
+function filterSemester(v) { selectedSemester = v; renderApp(); }
+function filterCourse(v) { selectedCourse = v; renderApp(); }
+function filterSubject(v) { selectedSubject = v; renderApp(); }
+
+// --- Download / Summarize / Quiz ---
+function downloadText(id) {
+  const doc = allDocuments.find(d => d.id === id);
+  if (!doc || !doc.content) return alert('No content to download');
+  const blob = new Blob([doc.content], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (doc.title || 'document') + '.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function summarizeDocument(id) {
+  const doc = allDocuments.find(d => d.id === id);
+  if (!doc) return alert('Document not found');
+
+  let content = doc.content;
+  if (!content || content.includes('[No text could be extracted')) {
+    content = Document "${doc.title}" uploaded. Type: ${doc.type}, Subject: ${doc.subject}, Course: ${doc.course}, Semester: ${doc.semester}.;
+  }
+
+  const sentences = content.replace(/\s+/g, ' ').trim().split(/(?<=\.)\s+/);
+  const summary = sentences.slice(0, 3).join(' ') + (sentences.length>3?'...':'');
+  alert('Summary:\n\n' + summary);
+}
+
+async function generateQuiz(id) {
+  const doc = allDocuments.find(d => d.id === id);
+  if (!doc) return alert('Document not found');
+
+  let content = doc.content;
+  if (!content || content.includes('[No text could be extracted')) {
+    content = Document "${doc.title}" uploaded. Type: ${doc.type}, Subject: ${doc.subject}, Course: ${doc.course}, Semester: ${doc.semester}.;
+  }
+
+  alert('Quiz Questions:\n\n1) What is the main topic?\n2) Mention two key points.\n3) Give an example from text.');
+}
+
+// --- Upload modal ---
+function openUploadModal() {
+  const modal = document.getElementById('modal-container');
+  modal.innerHTML = `
+    <div id="upload-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 w-[400px] max-w-[95%] relative">
+        <button onclick="closeUploadModal()" class="absolute right-3 top-2 font-bold">✕</button>
+        <h3 class="font-bold text-lg mb-4">Upload Document</h3>
+        <form id="modal-upload-form" class="flex flex-col gap-2">
+          <label>Type</label>
+          <select id="doc-type" required class="p-2 border rounded">
+            <option value="">Select type</option>
+            <option value="notes">Notes</option>
+            <option value="pyqs">PYQs</option>
+          </select>
+          <label>Title</label>
+          <input id="doc-title" required placeholder="Title" class="p-2 border rounded">
+          <label>Semester</label>
+          <select id="doc-semester" required class="p-2 border rounded">
+            <option value="">Select semester</option>
+            ${semesters.map(s => <option value="${s}">Semester ${s}</option>).join('')}
+          </select>
+          <label>Course</label>
+          <select id="doc-course" required class="p-2 border rounded">
+            <option value="">Select course</option>
+            ${courses.map(c => <option value="${c}">${c}</option>).join('')}
+          </select>
+          <label>Subject</label>
+          <select id="doc-subject" required class="p-2 border rounded">
+            <option value="">Select subject</option>
+            ${subjects.map(s => <option value="${s}">${s}</option>).join('')}
+          </select>
+          <label>File (optional)</label>
+          <input type="file" id="doc-file" class="p-2 border rounded">
+          <label>Or Text Content (optional)</label>
+          <textarea id="doc-content" rows="4" class="p-2 border rounded" placeholder="Write content if no file"></textarea>
+          <button type="submit" class="bg-blue-600 text-white py-2 rounded mt-2">Upload</button>
+        </form>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('modal-upload-form').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData();
+    fd.append('title', document.getElementById('doc-title').value);
+    fd.append('type', document.getElementById('doc-type').value);
+    fd.append('semester', document.getElementById('doc-semester').value);
+    fd.append('course', document.getElementById('doc-course').value);
+    fd.append('subject', document.getElementById('doc-subject').value);
+    fd.append('content', document.getElementById('doc-content').value || '');
+    const fileInput = document.getElementById('doc-file');
+    if (fileInput.files.length > 0) fd.append('file', fileInput.files[0]);
+
+    try {
+      const res = await fetch('/upload', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error('Upload failed');
+      await res.json();
+      alert('Upload successful!');
+      closeUploadModal();
+      await initialize();
+    } catch (err) {
+      console.error('Upload error', err);
+      alert('Upload failed. Check server console.');
+    }
+  };
+}
+
+function closeUploadModal() { document.getElementById('modal-container').innerHTML = ''; }
+
+// --- Initialize ---
+async function initialize() {
+  await fetchDocuments();
+  renderApp();
+}
+
+document.addEventListener('DOMContentLoaded', initialize);
